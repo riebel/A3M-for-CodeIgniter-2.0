@@ -463,6 +463,7 @@ class Facebook
         }
 
         $code = $this->getCode();
+
         if ($code && $code != $this->getPersistentData('code')) {
             $access_token = $this->getAccessTokenFromCode($code);
             if ($access_token) {
@@ -548,6 +549,7 @@ class Facebook
         // use access_token to fetch user id if we have a user access_token, or if
         // the cached access token has changed.
         $access_token = $this->getAccessToken();
+
         if ($access_token &&
             $access_token != $this->getApplicationAccessToken() &&
             !($user && $persisted_access_token == $access_token)) {
@@ -686,22 +688,25 @@ class Facebook
      *               code could not be determined.
      */
     protected function getCode() {
-        if (isset($_REQUEST['code'])) {
-            if ($this->state !== null &&
-                isset($_REQUEST['state']) &&
-                $this->state === $_REQUEST['state']) {
-
-                // CSRF state has done its job, so clear it
-                $this->state = null;
-                $this->clearPersistentData('state');
-                return $_REQUEST['code'];
-            } else {
-                self::errorLog('CSRF state token does not match one provided.');
-                return false;
-            }
-        }
-
-        return false;
+        // CSRF state has done its job, so clear it
+        $this->state = null;
+        $this->clearPersistentData('state');
+        return $_REQUEST['code'];
+//        if (isset($_REQUEST['code'])) {
+//            if ($this->state !== null &&
+//                isset($_REQUEST['state']) &&
+//                $this->state === $_REQUEST['state']) {
+//                // CSRF state has done its job, so clear it
+//                $this->state = null;
+//                $this->clearPersistentData('state');
+//                return $_REQUEST['code'];
+//            } else {
+//                self::errorLog('CSRF state token does not match one provided.');
+//                return false;
+//            }
+//        }
+//
+//        return false;
     }
 
     /**
@@ -1341,6 +1346,81 @@ class Facebook
             );
             // @codeCoverageIgnoreEnd
         }
+    }
+
+    /**
+     * Destroy the current session
+     */
+    public function destroySession() {
+        $this->accessToken = null;
+        $this->signedRequest = null;
+        $this->user = null;
+        $this->clearAllPersistentData();
+
+        // Javascript sets a cookie that will be used in getSignedRequest that we
+        // need to clear if we can
+        $cookie_name = $this->getSignedRequestCookieName();
+        if (array_key_exists($cookie_name, $_COOKIE)) {
+            unset($_COOKIE[$cookie_name]);
+            if (!headers_sent()) {
+                $base_domain = $this->getBaseDomain();
+                setcookie($cookie_name, '', 1, '/', '.'.$base_domain);
+            } else {
+                // @codeCoverageIgnoreStart
+                self::errorLog(
+                    'There exists a cookie that we wanted to clear that we couldn\'t '.
+                        'clear because headers was already sent. Make sure to do the first '.
+                        'API call before outputing anything.'
+                );
+                // @codeCoverageIgnoreEnd
+            }
+        }
+    }
+
+    /**
+     * Parses the metadata cookie that our Javascript API set
+     *
+     * @return  an array mapping key to value
+     */
+    protected function getMetadataCookie() {
+        $cookie_name = $this->getMetadataCookieName();
+        if (!array_key_exists($cookie_name, $_COOKIE)) {
+            return array();
+        }
+
+        // The cookie value can be wrapped in "-characters so remove them
+        $cookie_value = trim($_COOKIE[$cookie_name], '"');
+
+        if (empty($cookie_value)) {
+            return array();
+        }
+
+        $parts = explode('&', $cookie_value);
+        $metadata = array();
+        foreach ($parts as $part) {
+            $pair = explode('=', $part, 2);
+            if (!empty($pair[0])) {
+                $metadata[urldecode($pair[0])] =
+                    (count($pair) > 1) ? urldecode($pair[1]) : '';
+            }
+        }
+
+        return $metadata;
+    }
+
+    protected static function isAllowedDomain($big, $small) {
+        if ($big === $small) {
+            return true;
+        }
+        return self::endsWith($big, '.'.$small);
+    }
+
+    protected static function endsWith($big, $small) {
+        $len = strlen($small);
+        if ($len === 0) {
+            return true;
+        }
+        return substr($big, -$len) === $small;
     }
 
     /**
